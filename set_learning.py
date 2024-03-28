@@ -19,16 +19,19 @@ def generate_data():
 class SetNN(nn.Module):
     def __init__(self):
         super(SetNN, self).__init__()
-        self.embedding = nn.Embedding(num_embeddings=1000, embedding_dim=10) 
-        self.global_max_pool = nn.AdaptiveMaxPool1d(1)  # global max pooling - permutation invariance
-        self.fc = nn.Linear(10, 1)  
+        self.embedding = nn.Embedding(num_embeddings=1000, embedding_dim=20)  
+        self.self_attention1 = nn.MultiheadAttention(embed_dim=20, num_heads=4, batch_first=True)  
+        self.self_attention2 = nn.MultiheadAttention(embed_dim=20, num_heads=4, batch_first=True) 
+        self.fc1 = nn.Linear(20, 10) 
+        self.fc2 = nn.Linear(10, 1) 
 
     def forward(self, x):
-        x = self.embedding(x)  
-        x = x.transpose(1, 2)  
-        x = self.global_max_pool(x) 
-        x = x.view(x.size(0), -1)  
-        x = self.fc(x) 
+        x = self.embedding(x)
+        attn_output, _ = self.self_attention1(x, x, x)
+        attn_output, _ = self.self_attention2(attn_output, attn_output, attn_output)
+        x = attn_output.mean(dim=1)
+        x = F.relu(self.fc1(x))  
+        x = self.fc2(x)
         return x
 
 class SetDataset(Dataset):
@@ -49,12 +52,19 @@ class SetDataset(Dataset):
 # Define the training loop
 def train(model, dataloader, epochs=10):
     model.train()
-    optimizer = optim.Adam(model.parameters())
+    optimizer = optim.AdamW(model.parameters(), lr=0.005)
     mse_loss = []
+
+    # Move model to cuda if available
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
 
     for epoch in tqdm(range(epochs), desc="Epochs"):
         total_loss = 0
         for x, y in tqdm(dataloader, desc=f"Training Epoch {epoch+1}"):
+            # Move data to cuda if available
+            x, y = x.to(device), y.to(device)
+
             optimizer.zero_grad()
             outputs = model(x).squeeze() 
             loss = F.mse_loss(outputs, y)
